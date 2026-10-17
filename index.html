@@ -283,17 +283,79 @@ function toggleDropdown() { document.getElementById('dlMenu').classList.toggle('
 function showModal(id) { document.getElementById(id).style.display='block'; document.getElementById('overlay').style.display='block'; }
 function hideAll() { document.querySelectorAll('.modal, .overlay, .dropdown-content').forEach(e=>e.style.display='none'); document.querySelectorAll('.dropdown-content').forEach(e=>e.classList.remove('show')); }
 
+
 document.getElementById('fIn').onchange = (e) => {
-    let reader = new FileReader();
-    reader.onload = (ev) => {
-        let raw = XLSX.utils.sheet_to_json(XLSX.read(new Uint8Array(ev.target.result), {type:"array"}).Sheets[XLSX.read(new Uint8Array(ev.target.result), {type:"array"}).SheetNames[0]], {header:1});
-        let payload = { action:"UPLOAD_FILE", fileName:e.target.files[0].name, uploadDate:document.getElementById('upDate').value, fileId:"F"+Date.now(), rows:raw.slice(1), email: uEmail };
-        fetch(FIXED_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(payload)});
-        if(extUrl) fetch(extUrl, {method:'POST', mode:'no-cors', body:JSON.stringify(payload)});
-        alert("Uploading..."); hideAll(); setTimeout(syncData, 2500);
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 4 * 1024 * 1024) {
+        alert("Please select an Excel file smaller than 4 MB.");
+        e.target.value = "";
+        return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = async (ev) => {
+        try {
+            const bytes = new Uint8Array(ev.target.result);
+
+            // Read the Excel data
+            const workbook = XLSX.read(bytes, { type: "array" });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const raw = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+            // Convert the original file to Base64
+            let binary = "";
+            const chunkSize = 8192;
+
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+                binary += String.fromCharCode(
+                    ...bytes.subarray(i, i + chunkSize)
+                );
+            }
+
+            const payload = {
+                action: "UPLOAD_FILE",
+                fileName: file.name,
+                uploadDate: document.getElementById("upDate").value,
+                fileId: "F" + Date.now(),
+                rows: raw.slice(1),
+                fileData: btoa(binary),
+                mimeType: file.type || "application/octet-stream",
+                email: uEmail
+            };
+
+            updateStatus("Uploading...", "orange");
+
+            // Send the original Excel file to Google Apps Script
+            const response = await fetch(FIXED_URL, {
+                method: "POST",
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if (!result.success) {
+                throw new Error(result.error || "Upload failed");
+            }
+
+            alert("File uploaded successfully to Google Drive!");
+            hideAll();
+            await syncData();
+
+        } catch (error) {
+            console.error("Upload error:", error);
+            alert("Upload failed. Check your Google Apps Script configuration.");
+            updateStatus("Upload failed", "red");
+        } finally {
+            e.target.value = "";
+        }
     };
-    reader.readAsArrayBuffer(e.target.files[0]);
+
+    reader.readAsArrayBuffer(file);
 };
+
 </script>
 </body>
 </html>
